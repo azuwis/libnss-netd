@@ -528,6 +528,17 @@ class NetdTestCase(unittest.TestCase):
                 paths.append(env["LD_LIBRARY_PATH"])
             library_path = os.pathsep.join(paths)
         env["LD_LIBRARY_PATH"] = library_path
+        # A preloaded libnss_netd.so.2 (for example /etc/ld-nix.so.preload on
+        # Nix-on-Droid) wins the SONAME lookup before LD_LIBRARY_PATH. Preload
+        # the test module so NSS resolves "netd" to this copy. LD_PRELOAD is
+        # loaded before /etc/ld.so.preload, so appending still beats a module
+        # from the preload file while keeping any existing preload first: an
+        # instrumented module must not be loaded before the sanitizer runtime.
+        if os.path.exists(MODULE) and TESTDIR in library_path.split(os.pathsep):
+            preload = [MODULE]
+            if env.get("LD_PRELOAD"):
+                preload.insert(0, env["LD_PRELOAD"])
+            env["LD_PRELOAD"] = os.pathsep.join(preload)
         env["NETDNS_SOCKET"] = SOCK if netd_socket is None else netd_socket
         env["NSS_HOSTS"] = DEFAULT_HOSTS if hosts is None else hosts
         cmd = [sys.executable, SELF, "--worker", *args]
@@ -685,6 +696,12 @@ class LoadingTest(NetdTestCase):
                              netd_socket=os.path.join(WORK, "nope"))
 
     def test_missing_module_falls_through(self):
+        # A globally preloaded libnss_netd.so.2 exports its symbols; a copy
+        # loaded by these tests does not.
+        if getattr(ctypes.CDLL(None), "_nss_netd_gethostbyname4_r",
+                   None) is not None:
+            self.skipTest("libnss_netd.so.2 is preloaded, so it cannot be "
+                          "made missing")
         only_fallback = os.path.join(WORK, "only-fallback")
         os.makedirs(only_fallback, exist_ok=True)
         shutil.copy(os.path.join(WORK, "libnss_fakedns.so.2"), only_fallback)
