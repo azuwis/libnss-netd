@@ -32,13 +32,18 @@ PREFIX ?= /usr/local
 LIBDIR ?= $(PREFIX)/lib
 
 MODULE = libnss_netd.so.2
+SHIM = nss-hosts-shim.so
 TEST_MODULE = test/$(MODULE)
 
-all: $(MODULE)
+all: $(MODULE) $(SHIM)
 
 $(MODULE): libnss_netd.c
 	$(CC) -shared -fPIC $(CPPFLAGS) $(SOCKET_FLAGS) $(CFLAGS) $(HARDEN) \
 		$(LDSO) -o $@ $<
+
+$(SHIM): nss-hosts-shim.c
+	$(CC) -shared -fPIC $(CPPFLAGS) $(CFLAGS) $(HARDEN) \
+		-Wl,-z,relro,-z,now -Wl,-z,defs -o $@ $< -ldl
 
 $(TEST_MODULE): libnss_netd.c
 	$(CC) -shared -fPIC $(CPPFLAGS) $(TEST_SOCKET_FLAGS) \
@@ -48,13 +53,15 @@ $(TEST_MODULE): libnss_netd.c
 check: $(TEST_MODULE)
 	python3 test/test_libnss_netd.py
 
-install: $(MODULE)
+install: $(MODULE) $(SHIM)
 	install -Dm644 $(MODULE) $(DESTDIR)$(LIBDIR)/$(MODULE)
+	install -Dm644 $(SHIM) $(DESTDIR)$(LIBDIR)/$(SHIM)
 
 uninstall:
 	rm -f $(DESTDIR)$(LIBDIR)/$(MODULE)
+	rm -f $(DESTDIR)$(LIBDIR)/$(SHIM)
 
 clean:
-	rm -f $(MODULE) $(TEST_MODULE)
+	rm -f $(MODULE) $(SHIM) $(TEST_MODULE)
 
 .PHONY: all check install uninstall clean

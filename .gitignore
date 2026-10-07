@@ -1,2 +1,3 @@
 libnss_netd.so.2
+nss-hosts-shim.so
 __pycache__/

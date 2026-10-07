@@ -77,6 +77,17 @@ Use a directory that other users cannot write to. The loader ignores
 `LD_LIBRARY_PATH` for setuid and setgid programs. Those need the module in a
 path their glibc loader already searches.
 
+Nix's `preloadNSS()` overrides the hosts database inside its own process,
+bypassing `/etc/nsswitch.conf`. Preload both files into nixpkgs' glibc preload
+file, `/etc/ld-nix.so.preload`:
+
+```text
+/path/to/libnss-netd/nss-hosts-shim.so
+/path/to/libnss-netd/libnss_netd.so.2
+```
+
+Set `NSS_HOSTS_SHIM_DEBUG=1` to log ignored overrides.
+
 ## Check on a device
 
 After installation, try normal glibc lookups:
