@@ -1,0 +1,76 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: build, warnings are errors
+        run: |
+          make CFLAGS='-O2 -Wall -Wextra -Werror'
+          cc -shared -fPIC -O2 -Werror -Wall -Wextra -Wpedantic -Wshadow \
+            -Wconversion -Wsign-conversion -Wcast-qual -Wcast-align=strict \
+            -Wformat=2 -c -o /dev/null libnss_netd.c
+          cc -fanalyzer -O1 -Wall -Wextra -Werror -c -o /dev/null libnss_netd.c
+          cc -fanalyzer -O1 -Wall -Wextra -Werror -DNETDNS_ALLOW_SOCKET_OVERRIDE \
+            -c -o /dev/null libnss_netd.c
+          # The installed module must not carry the test-only socket override.
+          test -s libnss_netd.so.2
+          ! strings libnss_netd.so.2 | grep -q NETDNS_SOCKET
+          ! nm -D libnss_netd.so.2 | grep -q secure_getenv
+
+      - name: install is readable, not executable
+        run: |
+          make install DESTDIR="$PWD/dest"
+          [ "$(stat -c '%a' dest/usr/local/lib/libnss_netd.so.2)" = 644 ]
+
+      - name: test
+        run: make check
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: build and run the suite under ASan and UBSan
+        env:
+          CC: cc -fsanitize=address,undefined -fno-sanitize-recover=all
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1
+        # The module is dlopen()ed into python3, so libasan has to come first
+        # in the library list: LD_PRELOAD does that.
+        run: |
+          export LD_PRELOAD="$(cc -print-file-name=libasan.so)"
+          make CFLAGS='-O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all' HARDEN= check
+
+  cross:
+    # The module is for Android: check both the 64-bit and 32-bit ARM ABIs,
+    # where pointer sizes and struct layouts differ.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: build for aarch64 and armhf
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+          make CC=aarch64-linux-gnu-gcc CFLAGS='-O2 -Wall -Wextra -Werror'
+          make clean
+          make CC=arm-linux-gnueabihf-gcc CFLAGS='-O2 -Wall -Wextra -Werror'
