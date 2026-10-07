@@ -65,26 +65,32 @@ final.
 
 ### Nix-on-Droid
 
-nixpkgs' glibc does not use the system `/etc/ld.so.cache`, so installing the
-module in `/usr/local/lib` and running `ldconfig` may not make it loadable.
-Put the directory containing `libnss_netd.so.2` on the loader path instead:
+nixpkgs' glibc does not read the system `/etc/ld.so.cache` or
+`/etc/ld.so.preload`. It reads `/etc/ld-nix.so.preload` instead, so the
+`ldconfig` step above will not make the module loadable. Nix-on-Droid manages
+`/etc`, so declare that file in your configuration instead. The example below
+assumes `libnss-netd` is packaged in your `pkgs` set:
 
-```sh
-export LD_LIBRARY_PATH="/path/to/libnss-netd${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+```nix
+environment.etc."ld-nix.so.preload".text = ''
+  ${pkgs.libnss-netd}/lib/nss-hosts-shim.so
+  ${pkgs.libnss-netd}/lib/libnss_netd.so.2
+'';
 ```
 
-Use a directory that other users cannot write to. The loader ignores
-`LD_LIBRARY_PATH` for setuid and setgid programs. Those need the module in a
-path their glibc loader already searches.
+If you built the module by hand, replace the two interpolations with the
+absolute paths of the installed files.
 
-Nix's `preloadNSS()` overrides the hosts database inside its own process,
-bypassing `/etc/nsswitch.conf`. Preload both files into nixpkgs' glibc preload
-file, `/etc/ld-nix.so.preload`:
+Preloading `libnss_netd.so.2` makes it loadable as an NSS module. glibc opens
+NSS modules by name, and the loader already has the preloaded copy under the
+`libnss_netd.so.2` SONAME, so no `LD_LIBRARY_PATH` or other search path is
+needed.
 
-```text
-/path/to/libnss-netd/nss-hosts-shim.so
-/path/to/libnss-netd/libnss_netd.so.2
-```
+`nss-hosts-shim.so` is needed because Nix's `preloadNSS()` calls
+`__nss_configure_lookup("hosts", "files dns")` in its own process. That
+override bypasses `/etc/nsswitch.conf` and skips netd. The shim ignores that
+one call and passes every other `__nss_configure_lookup` call through to
+glibc.
 
 Set `NSS_HOSTS_SHIM_DEBUG=1` to log ignored overrides.
 
